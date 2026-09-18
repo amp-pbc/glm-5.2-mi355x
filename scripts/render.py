@@ -1,6 +1,7 @@
 """Render customer Kubernetes resources. Does not access a cluster."""
 import argparse
 import copy
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import sys
 import yaml
@@ -14,7 +15,24 @@ DOWNWARD = [{"name": key, "valueFrom": {"fieldRef": {"fieldPath": field}}}
             for key, field in [("POD_NAME", "metadata.name"), ("POD_NAMESPACE", "metadata.namespace"), ("POD_IP", "status.podIP")]]
 
 
-def render(namespace="default", prefill=4, decode=4, policy="kv-aware"):
+def price_label(value):
+    try:
+        price = Decimal(str(value))
+        if not price.is_finite() or price < 0 or price != price.quantize(Decimal("0.01")):
+            raise ValueError("Limit price must be nonnegative USD in whole cents")
+        result = format(price, ".2f")
+        if len(result) > 63:
+            raise ValueError("Limit price is too long for a Kubernetes label")
+        return result
+    except InvalidOperation as exc:
+        raise ValueError("Invalid limit price") from exc
+
+
+def render(namespace="default", prefill=4, decode=4, policy="kv-aware", workload_kind="deployment", limit_price=None):
+    if limit_price is not None:
+        if workload_kind != "job":
+            raise ValueError("The documented per-workload price override is Job-only; use --workload-kind job")
+        limit_price = price_label(limit_price)
     def obj(kind, name, spec=None, **extra):
         api = "apps/v1" if kind == "Deployment" else "batch/v1" if kind == "Job" else "rbac.authorization.k8s.io/v1" if kind in ("Role", "RoleBinding") else "v1"
         out = {"apiVersion": api, "kind": kind,
@@ -84,7 +102,20 @@ def render(namespace="default", prefill=4, decode=4, policy="kv-aware"):
             kvd["restartPolicy"] = "Always"
             kvd["startupProbe"] = {"exec": {"command": ["/overlay/bin/infera-exec", "python3", "-m", "infera.kvd.statctl", "--socket", "/kvd/kvd.sock"]}, "periodSeconds": 5, "timeoutSeconds": 10, "failureThreshold": 60}
             pod["initContainers"].append(kvd)
-        objects.append(obj("Deployment", name, {"replicas": 1 if is_router else prefill if role == "prefill" else decode, "strategy": {"type": "Recreate"}, "progressDeadlineSeconds": 7200, "selector": {"matchLabels": labels}, "template": {"metadata": {"labels": labels}, "spec": pod}}))
+        count = 1 if is_router else prefill if role == "prefill" else decode
+        if not is_router and workload_kind == "job":
+            pod["restartPolicy"] = "Never"
+            for index in range(count):
+                worker = obj("Job", f"{name}-{index}", {
+                    "backoffLimit": 0, "activeDeadlineSeconds": 14400,
+                    "template": {"metadata": {"labels": labels.copy()}, "spec": copy.deepcopy(pod)},
+                })
+                if limit_price is not None:
+                    worker["metadata"]["labels"]["nationalcompute.com/limit-price"] = limit_price
+                    worker["spec"]["template"]["metadata"]["labels"]["nationalcompute.com/limit-price"] = limit_price
+                objects.append(worker)
+        else:
+            objects.append(obj("Deployment", name, {"replicas": count, "strategy": {"type": "Recreate"}, "progressDeadlineSeconds": 7200, "selector": {"matchLabels": labels}, "template": {"metadata": {"labels": labels}, "spec": pod}}))
     objects.append(obj("Service", "glm52-router", {"selector": {"app.kubernetes.io/name": "glm52-router"}, "ports": [{"name": "http", "port": 8000, "targetPort": 8000}]}))
     return objects
 
@@ -96,12 +127,17 @@ if __name__ == "__main__":
     p.add_argument("--decode", type=int, default=4)
     p.add_argument("--policy", choices=["kv-aware", "round-robin"], default="kv-aware")
     p.add_argument("--phase", choices=["stage", "serve", "all"], default="all")
+    p.add_argument("--workload-kind", choices=["deployment", "job"], default="deployment")
+    p.add_argument("--limit-price", help="Explicit USD/GPU-hour ceiling for GPU Jobs; no default")
     a = p.parse_args()
     if a.prefill < 1 or a.decode < 1:
         p.error("Both roles need at least one worker")
-    docs = render(a.namespace, a.prefill, a.decode, a.policy)
+    try:
+        docs = render(a.namespace, a.prefill, a.decode, a.policy, a.workload_kind, a.limit_price)
+    except ValueError as exc:
+        p.error(str(exc))
     if a.phase == "stage":
-        docs = [d for d in docs if d["kind"] in ("ConfigMap", "Job")]
+        docs = [d for d in docs if d["kind"] == "ConfigMap" or d["metadata"]["name"] == "glm52-weights"]
     elif a.phase == "serve":
-        docs = [d for d in docs if d["kind"] != "Job"]
+        docs = [d for d in docs if d["metadata"]["name"] != "glm52-weights"]
     yaml.safe_dump_all(docs, sys.stdout, sort_keys=False)

@@ -1,8 +1,28 @@
 # Validation record and procedure
 
-2026-09-18: recipe preparation only. Customer authentication is pending. No GPU nodes have been allocated by this GLM test and no live results are available.
+2026-09-18: customer CPU preflight passed; GPU testing is pending market admission. The configured bid was rejected before any GPU node was allocated. No GLM inference or throughput result is available yet.
 
 Local validation passed: five unit tests covering the 64-GPU manifest, mount references, stage receipt rejection, causal replay, and failure accounting; Python compilation; registry lookup of both pinned serving image digests. These checks do not execute ROCm, SGLang, Mooncake or kvd and do not replace a Kubernetes server dry run.
+
+## Customer preflight results
+
+- Kubernetes `v1.36.2+rke2r1` accepted the full eight-node serving manifest in a server dry run, including native sidecars.
+- The CPU staging Job downloaded the pinned AMD checkpoint and verified the sizes of all 291 repository files, including 282 weight shards. Total checkpoint size: 438,033,728,823 bytes. The existing Kimi checkpoint was preserved.
+- The pinned stock image reports Python 3.10.12, SGLang 0.5.15.post1, PyTorch 2.9.1+rocm7.2.0.lw.git7e1940d4, and Transformers 5.12.1. Mooncake imports through the overlay successfully.
+- The live SGLang argument parser accepts the specified NSA backends, HiCache size, decode radix-cache flag, cache reporting, and metrics options.
+- A temporary CPU kvd daemon started and answered `statctl`. This checks daemon/socket compatibility only: no model KV was stored. The CPU probe lacked locked-memory capability; its unpinned-arena warning does not establish how the GPU sidecars behave with `IPC_LOCK`.
+- The router started with explicit `kv-aware` policy, Kubernetes discovery, HTTP request transport, and ZMQ cache events. With no admitted GPU workers, its successful health endpoint is **not** a serving-readiness result.
+- The initial one-prefill/one-decode smoke-test pair remains the prerequisite to scaling to four of each. The requested eight-node run is outstanding.
+
+The stock image is about 26.2 GiB compressed and took roughly 11 minutes to pull/unpack on the CPU worker. Check root-disk headroom as well as shared-volume space. One preflight attempt stopped because of a quoting error in the test command; after fixing it, the resumed staging Job reused completed files. This was not an engine failure.
+
+The pinned overlay's code differs from current Infera source: the current source skips decode-side kvd wiring because that SGLang path does not prefetch from storage, while the pinned overlay still wires both roles. Measure each role's actual writes and reads. A running decode-side daemon does not prove decode-side cache benefit.
+
+### Admission retry
+
+Fresh Deployment requests and then fresh, independently submitted GPU Jobs were tested with an explicitly authorized higher price label. Kubernetes retained the label on both Jobs and their Pod templates, but new market decisions continued to evaluate the previous, lower standing price. This establishes a discrepancy between the submitted label and observed admission; it does not establish that the requested higher price was insufficient. No GPU node was allocated. Customer API access is needed to inspect/update the standing cluster price before retrying. No platform or node configuration was changed.
+
+The optional Job renderer passed six local tests, including explicit GPU-only price labels and invalid-price rejection, and a Kubernetes server dry run. Those checks validate resource construction, not marketplace enforcement or GPU serving.
 
 The [upstream recipe README at the audited revision](https://github.com/AMD-AGI/Infera/blob/625a950b109371aaf8ebedfdc05757b57ac32eab/examples/recipes/glm5.2/README.md) marks disaggregated + kvd as not run. Its plain disaggregated cross-node result required replacing the shared local-path model PVC. Its SGLang kvd tier evidence uses Qwen3-0.6B, so it does not establish GLM PD+kvd correctness. This repository addresses the storage/deployment structure; runtime validation remains necessary.
 

@@ -2,7 +2,7 @@
 
 Customer Kubernetes recipe for AMD's `amd/GLM-5.2-MXFP4`, using stock SGLang with a mounted Infera overlay. The initial layout is **four prefill nodes and four decode nodes**, TP8 on every node, with kvd on both roles: eight nodes / 64 GPUs total. This is eight independent TP8 workers, not one model using TP64.
 
-**Status: draft, not live-validated.** No eight-node correctness, KV-transfer, cache, or throughput result is claimed. See [validation status](docs/validation.md).
+**Status: customer CPU preflight passed; GPU validation pending market admission.** No eight-node correctness, KV-transfer, cache, or throughput result is claimed. See [validation status](docs/validation.md).
 
 Adapted from [AMD's recipe](https://rocm.docs.amd.com/projects/infera/en/latest/recipes/glm5.2.html). The exact upstream manifest is preserved in [upstream/disaggregated-kvd.yaml](upstream/disaggregated-kvd.yaml). [Provenance and licenses](THIRD_PARTY_NOTICES.md) list the immutable source/image/model pins.
 
@@ -43,6 +43,10 @@ kubectl --context "$CUSTOMER_CONTEXT" port-forward svc/glm52-router 8000:8000
 ```
 
 Keep port-forward running in a separate terminal. The serving manifest includes a CPU router, discovery RBAC, and ordinary Deployments; no Infera operator or platform changes are required. Pod anti-affinity enforces distinct nodes. Fixed hostnames and RWO local-path PVCs from the upstream example are replaced with customer node selection and per-node NVMe. The `Recreate` strategy avoids requesting extra GPUs during a rollout.
+
+For a new image/fabric combination, first render `--prefill 1 --decode 1` and verify the pair before applying the full eight-node manifest. If workers remain `SchedulingGated`, inspect `kubectl --context "$CUSTOMER_CONTEXT" get workloads -o yaml`: a market bid rejection needs a customer budget decision in Burst Capacity. The eight-node hourly ceiling is 64 times the per-GPU hourly limit. Do not change infrastructure or remove scheduling gates to bypass admission.
+
+The renderer also supports `--workload-kind job` for bounded tests: one independent GPU Job per node, no automatic retries, and a four-hour deadline. This mode is not a persistent Deployment. Its optional `--limit-price YOUR_CEILING` writes the documented per-Job price label. **The live preflight did not observe admission honoring that label.** Read the actual admission verdict and verify the standing customer price before running; do not rely on the label as a verified spending cap. Switching workload kinds requires deleting the previous serving manifest first to avoid duplicate GPU demand.
 
 Workers copy the pinned checkpoint from shared storage to local NVMe. The router uses the same checkpoint's tokenizer. The engine flags explicitly enable the ROCm TileLang DSA path and `glm45` reasoning parser. FP8 KV, a 32K context, 8192 prefill token budget, and 24 running requests per worker initially match the upstream recipe. These are starting settings, not optimized throughput claims.
 
