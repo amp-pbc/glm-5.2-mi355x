@@ -18,6 +18,12 @@ The stock image is about 26.2 GiB compressed and took roughly 11 minutes to pull
 
 The pinned overlay's code differs from current Infera source: the current source skips decode-side kvd wiring because that SGLang path does not prefetch from storage, while the pinned overlay still wires both roles. Measure each role's actual writes and reads. A running decode-side daemon does not prove decode-side cache benefit.
 
+### Admission retry
+
+Fresh Deployment requests and then fresh, independently submitted GPU Jobs were tested with an explicitly authorized higher price label. Kubernetes retained the label on both Jobs and their Pod templates, but new market decisions continued to evaluate the previous, lower standing price. This establishes a discrepancy between the submitted label and observed admission; it does not establish that the requested higher price was insufficient. No GPU node was allocated. Customer API access is needed to inspect/update the standing cluster price before retrying. No platform or node configuration was changed.
+
+The optional Job renderer passed six local tests, including explicit GPU-only price labels and invalid-price rejection, and a Kubernetes server dry run. Those checks validate resource construction, not marketplace enforcement or GPU serving.
+
 The [upstream recipe README at the audited revision](https://github.com/AMD-AGI/Infera/blob/625a950b109371aaf8ebedfdc05757b57ac32eab/examples/recipes/glm5.2/README.md) marks disaggregated + kvd as not run. Its plain disaggregated cross-node result required replacing the shared local-path model PVC. Its SGLang kvd tier evidence uses Qwen3-0.6B, so it does not establish GLM PD+kvd correctness. This repository addresses the storage/deployment structure; runtime validation remains necessary.
 
 ## Required receipts

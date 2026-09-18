@@ -24,6 +24,23 @@ replay = module("replay", "bench/replay.py")
 
 
 class RecipeTests(unittest.TestCase):
+    def test_job_limit_price_is_explicit_and_gpu_only(self):
+        docs = render.render(workload_kind="job", limit_price="3.25")
+        workers = [d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] != "glm52-weights"]
+        self.assertEqual(len(workers), 8)
+        for d in workers:
+            self.assertEqual(d["metadata"]["labels"]["nationalcompute.com/limit-price"], "3.25")
+            self.assertEqual(d["spec"]["template"]["spec"]["restartPolicy"], "Never")
+            self.assertEqual(d["spec"]["backoffLimit"], 0)
+        for d in docs:
+            if d not in workers:
+                self.assertNotIn("nationalcompute.com/limit-price", d["metadata"]["labels"])
+        with self.assertRaises(ValueError):
+            render.render(limit_price="3.25")
+        for price in ["NaN", "-1", "3.251", "Infinity"]:
+            with self.assertRaises(ValueError):
+                render.price_label(price)
+
     def test_eight_distinct_gpu_workers_and_valid_mounts(self):
         deployments = [d for d in render.render() if d["kind"] == "Deployment"]
         requested = 0

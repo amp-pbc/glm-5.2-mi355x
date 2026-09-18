@@ -46,6 +46,8 @@ Keep port-forward running in a separate terminal. The serving manifest includes 
 
 For a new image/fabric combination, first render `--prefill 1 --decode 1` and verify the pair before applying the full eight-node manifest. If workers remain `SchedulingGated`, inspect `kubectl --context "$CUSTOMER_CONTEXT" get workloads -o yaml`: a market bid rejection needs a customer budget decision in Burst Capacity. The eight-node hourly ceiling is 64 times the per-GPU hourly limit. Do not change infrastructure or remove scheduling gates to bypass admission.
 
+The renderer also supports `--workload-kind job` for bounded tests: one independent GPU Job per node, no automatic retries, and a four-hour deadline. This mode is not a persistent Deployment. Its optional `--limit-price YOUR_CEILING` writes the documented per-Job price label. **The live preflight did not observe admission honoring that label.** Read the actual admission verdict and verify the standing customer price before running; do not rely on the label as a verified spending cap. Switching workload kinds requires deleting the previous serving manifest first to avoid duplicate GPU demand.
+
 Workers copy the pinned checkpoint from shared storage to local NVMe. The router uses the same checkpoint's tokenizer. The engine flags explicitly enable the ROCm TileLang DSA path and `glm45` reasoning parser. FP8 KV, a 32K context, 8192 prefill token budget, and 24 running requests per worker initially match the upstream recipe. These are starting settings, not optimized throughput claims.
 
 ## Verify before benchmarking
